@@ -1,6 +1,6 @@
 import {
-  requestNanoBananaGeneration,
   requestRoomAnalysis,
+  requestNanoBananaTour,
 } from "./services/nanoBanana.js";
 
 const GRID_COLUMNS = 24;
@@ -52,6 +52,17 @@ const state = {
   roomAnalysis: null,
   isAnalyzingRoom: false,
   showGrid: false,
+  viewer: {
+    offsetX: 0,
+    offsetY: 0,
+    zoom: 1,
+    dragging: false,
+    pointerId: null,
+    lastX: 0,
+    lastY: 0,
+  },
+  generatedTour: [],
+  activeViewId: "",
 };
 
 const els = {
@@ -74,6 +85,10 @@ const els = {
   resetRoom: document.querySelector("#reset-room"),
   toggleGrid: document.querySelector("#toggle-grid"),
   generatedImage: document.querySelector("#generated-image"),
+  resultNav: document.querySelector("#result-nav"),
+  resultFrame: document.querySelector("#result-frame"),
+  resultViewer: document.querySelector("#result-viewer"),
+  resultViewerHint: document.querySelector("#result-viewer-hint"),
   resultPlaceholder: document.querySelector("#result-placeholder"),
   resultStatus: document.querySelector("#result-status"),
   customItemName: document.querySelector("#custom-item-name"),
@@ -103,6 +118,9 @@ function attachEvents() {
   els.resetRoom.addEventListener("click", resetRoom);
   els.toggleGrid.addEventListener("click", toggleGrid);
   els.addCustomItem.addEventListener("click", addCustomItemToLibrary);
+  els.resultViewer.addEventListener("pointerdown", beginResultViewerDrag);
+  els.resultViewer.addEventListener("wheel", handleResultViewerWheel, { passive: false });
+  els.generatedImage.addEventListener("load", resetResultViewer);
   document.addEventListener("keydown", handleKeydown);
 }
 
@@ -327,8 +345,11 @@ function resetRoom() {
   state.roomImageDataUrl = "";
   state.roomAnalysis = null;
   state.isAnalyzingRoom = false;
+  state.generatedTour = [];
+  state.activeViewId = "";
   els.roomUpload.value = "";
   render();
+  setResultState({ status: "No output yet", views: [], activeViewId: "" });
   setLog("Room reset. Upload a new image to start again.");
 }
 
@@ -383,19 +404,20 @@ async function generateScene() {
     })),
   };
 
-  setLog("Submitting staged room payload to Nano Banana service...");
-  setResultState({ status: "Generating...", imageUrl: "" });
+  setLog("Submitting staged room payload to Nano Banana multi-view service...");
+  setResultState({ status: "Generating...", views: [], activeViewId: "" });
 
   try {
-    const result = await requestNanoBananaGeneration(payload);
+    const result = await requestNanoBananaTour(payload);
     setLog(JSON.stringify(result.meta, null, 2));
     setResultState({
-      status: result.imageDataUrl ? "Image ready" : "No image returned",
-      imageUrl: result.imageDataUrl,
+      status: result.views?.length ? "Tour ready" : "No views returned",
+      views: result.views || [],
+      activeViewId: result.defaultViewId || result.views?.[0]?.id || "",
     });
   } catch (error) {
     setLog(`Generation failed: ${error.message}`);
-    setResultState({ status: "Generation failed", imageUrl: "" });
+    setResultState({ status: "Generation failed", views: [], activeViewId: "" });
   }
 }
 
@@ -573,18 +595,137 @@ function setLog(message) {
   els.generationLog.textContent = message;
 }
 
-function setResultState({ status, imageUrl }) {
+function setResultState({ status, views, activeViewId }) {
   els.resultStatus.textContent = status;
-  if (!imageUrl) {
+  state.generatedTour = views || [];
+  state.activeViewId = activeViewId || state.generatedTour[0]?.id || "";
+  renderResultNav();
+
+  const activeView = getActiveGeneratedView();
+  if (!activeView?.imageDataUrl) {
+    resetResultViewer();
+    els.resultNav.hidden = true;
+    els.resultViewer.hidden = true;
+    els.resultViewerHint.hidden = true;
     els.generatedImage.hidden = true;
     els.generatedImage.removeAttribute("src");
     els.resultPlaceholder.hidden = false;
     return;
   }
 
-  els.generatedImage.src = imageUrl;
+  resetResultViewer();
+  els.resultNav.hidden = state.generatedTour.length <= 1;
+  els.generatedImage.src = activeView.imageDataUrl;
   els.generatedImage.hidden = false;
+  els.resultViewer.hidden = false;
+  els.resultViewerHint.hidden = false;
   els.resultPlaceholder.hidden = true;
+}
+
+function renderResultNav() {
+  els.resultNav.innerHTML = "";
+
+  state.generatedTour.forEach((view) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "result-nav__button";
+    button.textContent = view.label;
+    button.title = view.hint || view.label;
+    button.classList.toggle("is-active", view.id === state.activeViewId);
+    button.addEventListener("click", () => {
+      state.activeViewId = view.id;
+      setResultState({
+        status: "Tour ready",
+        views: state.generatedTour,
+        activeViewId: view.id,
+      });
+    });
+    els.resultNav.appendChild(button);
+  });
+}
+
+function getActiveGeneratedView() {
+  return state.generatedTour.find((view) => view.id === state.activeViewId) ?? null;
+}
+
+function beginResultViewerDrag(event) {
+  if (event.button !== 0 || els.generatedImage.hidden) {
+    return;
+  }
+
+  event.preventDefault();
+  state.viewer.dragging = true;
+  state.viewer.pointerId = event.pointerId;
+  state.viewer.lastX = event.clientX;
+  state.viewer.lastY = event.clientY;
+  els.resultViewer.setPointerCapture(event.pointerId);
+  els.resultViewer.addEventListener("pointermove", handleResultViewerDrag);
+  els.resultViewer.addEventListener("pointerup", endResultViewerDrag);
+  els.resultViewer.addEventListener("pointercancel", endResultViewerDrag);
+}
+
+function handleResultViewerDrag(event) {
+  if (!state.viewer.dragging || event.pointerId !== state.viewer.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - state.viewer.lastX;
+  const deltaY = event.clientY - state.viewer.lastY;
+  state.viewer.lastX = event.clientX;
+  state.viewer.lastY = event.clientY;
+  state.viewer.offsetX += deltaX;
+  state.viewer.offsetY += deltaY;
+  clampViewerOffsets();
+  renderResultViewer();
+}
+
+function endResultViewerDrag(event) {
+  if (event.pointerId !== state.viewer.pointerId) {
+    return;
+  }
+
+  state.viewer.dragging = false;
+  els.resultViewer.releasePointerCapture(event.pointerId);
+  els.resultViewer.removeEventListener("pointermove", handleResultViewerDrag);
+  els.resultViewer.removeEventListener("pointerup", endResultViewerDrag);
+  els.resultViewer.removeEventListener("pointercancel", endResultViewerDrag);
+  state.viewer.pointerId = null;
+}
+
+function handleResultViewerWheel(event) {
+  if (els.generatedImage.hidden) {
+    return;
+  }
+
+  event.preventDefault();
+  const zoomDelta = event.deltaY < 0 ? 0.12 : -0.12;
+  state.viewer.zoom = Math.min(3.2, Math.max(1, state.viewer.zoom + zoomDelta));
+  clampViewerOffsets();
+  renderResultViewer();
+}
+
+function resetResultViewer() {
+  state.viewer.offsetX = 0;
+  state.viewer.offsetY = 0;
+  state.viewer.zoom = 1;
+  state.viewer.dragging = false;
+  state.viewer.pointerId = null;
+  renderResultViewer();
+}
+
+function clampViewerOffsets() {
+  const viewportWidth = els.resultViewer.clientWidth || 1;
+  const viewportHeight = els.resultViewer.clientHeight || 1;
+  const horizontalLimit = ((state.viewer.zoom - 1) * viewportWidth) / 2;
+  const verticalLimit = ((state.viewer.zoom - 1) * viewportHeight) / 2;
+
+  state.viewer.offsetX = Math.max(-horizontalLimit, Math.min(horizontalLimit, state.viewer.offsetX));
+  state.viewer.offsetY = Math.max(-verticalLimit, Math.min(verticalLimit, state.viewer.offsetY));
+}
+
+function renderResultViewer() {
+  els.generatedImage.style.transform =
+    `translate(${state.viewer.offsetX}px, ${state.viewer.offsetY}px) scale(${state.viewer.zoom})`;
 }
 
 function createCatalogItem({ id, name, color, silhouette }) {

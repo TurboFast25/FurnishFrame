@@ -94,12 +94,18 @@
             <h2>Generated result</h2>
             <span id="result-status" class="tag muted">No output yet</span>
           </div>
-          <div class="result-frame">
-            <img id="generated-image" class="generated-image" alt="Generated room result" hidden />
+          <div id="result-nav" class="result-nav" hidden></div>
+          <div id="result-frame" class="result-frame">
+            <div id="result-viewer" class="result-viewer" hidden>
+              <img id="generated-image" class="generated-image" alt="Generated room result" hidden />
+            </div>
             <div id="result-placeholder" class="result-placeholder">
               Generated room preview will appear here.
             </div>
           </div>
+          <p id="result-viewer-hint" class="helper-copy result-viewer-hint" hidden>
+            Drag to look around the generated room. Use the mouse wheel or trackpad to zoom.
+          </p>
         </section>
       </main>
 

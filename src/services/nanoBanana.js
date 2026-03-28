@@ -31,3 +31,20 @@ export async function requestNanoBananaGeneration(payload) {
 
   return response.json();
 }
+
+export async function requestNanoBananaTour(payload) {
+  const response = await fetch("/api/generate-tour", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `Nano Banana tour request failed with ${response.status}`);
+  }
+
+  return response.json();
+}

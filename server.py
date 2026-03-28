@@ -22,7 +22,7 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def do_POST(self) -> None:
-        if self.path not in {"/api/generate", "/api/analyze"}:
+        if self.path not in {"/api/generate", "/api/analyze", "/api/generate-tour"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
             return
 
@@ -41,6 +41,8 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
                 request_body = build_analysis_request(payload)
                 gemini_response = call_gemini_api(request_body, api_key, ANALYSIS_MODEL)
                 result = extract_analysis_result(gemini_response)
+            elif self.path == "/api/generate-tour":
+                result = generate_tour(payload, api_key)
             else:
                 request_body = build_gemini_request(payload)
                 gemini_response = call_gemini_api(request_body, api_key, MODEL)
@@ -74,6 +76,10 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
 
 
 def build_gemini_request(payload: dict) -> dict:
+    return build_gemini_request_for_view(payload, None)
+
+
+def build_gemini_request_for_view(payload: dict, view: dict | None) -> dict:
     room_image_data_url = payload.get("roomImageDataUrl")
     room_analysis = payload.get("roomAnalysis") or {}
     furniture = payload.get("furniture", [])
@@ -89,13 +95,22 @@ def build_gemini_request(payload: dict) -> dict:
         for item in furniture
     ]
     mapping_lines = describe_room_mapping(room_analysis)
+    view_instruction = describe_view_instruction(view)
 
     prompt_parts = [
         "Use the provided room photo as the base image.",
         "Use the structured room analysis below as the primary scene map instead of relying only on the raw image.",
         *mapping_lines,
+        "Add only the staged furniture items listed below.",
+        "Do not redesign, replace, remove, or restyle any existing architecture, decor, furniture, windows, doors, art, rugs, or lighting already present in the room.",
+        "Preserve the original camera position, room layout, perspective, materials, shadows, and all existing objects unless one of the staged items physically occludes a small portion of them.",
+        "If a requested placement conflicts with a wall, doorway, window, or existing object, keep the item but shift it minimally to the nearest plausible floor position.",
+        "Render the result as an immersive wide room view that keeps the full scene coherent for pan-and-zoom exploration.",
         "Stage the room photorealistically with the following furniture placements.",
         "\n".join(furniture_lines) if furniture_lines else "- No extra furniture placements were supplied.",
+        f"Total staged items to add: {len(furniture)}.",
+        view_instruction,
+        "Do not introduce any unrequested new furniture or decor.",
         "Preserve room geometry, perspective, and lighting unless explicitly changed.",
     ]
     if user_prompt:
@@ -121,6 +136,34 @@ def build_gemini_request(payload: dict) -> dict:
                 "aspectRatio": "16:9",
                 "imageSize": "2K",
             },
+        },
+    }
+
+
+def generate_tour(payload: dict, api_key: str) -> dict:
+    views = get_tour_views()
+    generated_views = []
+
+    for view in views:
+        request_body = build_gemini_request_for_view(payload, view)
+        gemini_response = call_gemini_api(request_body, api_key, MODEL)
+        result = extract_generation_result(gemini_response)
+        generated_views.append(
+            {
+                "id": view["id"],
+                "label": view["label"],
+                "hint": view["hint"],
+                "imageDataUrl": result.get("imageDataUrl", ""),
+                "meta": result.get("meta", {}),
+            }
+        )
+
+    return {
+        "views": generated_views,
+        "defaultViewId": generated_views[0]["id"] if generated_views else "",
+        "meta": {
+            "model": MODEL,
+            "viewCount": len(generated_views),
         },
     }
 
@@ -265,6 +308,49 @@ def strip_json_fence(text: str) -> str:
         if len(lines) >= 3:
             return "\n".join(lines[1:-1]).strip()
     return stripped
+
+
+def get_tour_views() -> list[dict[str, str]]:
+    return [
+        {
+            "id": "front",
+            "label": "Front",
+            "hint": "Original anchored view",
+            "instruction": (
+                "Primary view: stay close to the uploaded camera position and show the full staged room head-on."
+            ),
+        },
+        {
+            "id": "left",
+            "label": "Look Left",
+            "hint": "Shift attention toward the left side of the room",
+            "instruction": (
+                "Secondary view: pivot the camera slightly left from the original viewpoint while preserving room continuity and item placement."
+            ),
+        },
+        {
+            "id": "right",
+            "label": "Look Right",
+            "hint": "Shift attention toward the right side of the room",
+            "instruction": (
+                "Secondary view: pivot the camera slightly right from the original viewpoint while preserving room continuity and item placement."
+            ),
+        },
+        {
+            "id": "closer",
+            "label": "Move In",
+            "hint": "Take a modest step into the room",
+            "instruction": (
+                "Secondary view: move the camera a small step forward into the room for a closer immersive look, without changing the room layout."
+            ),
+        },
+    ]
+
+
+def describe_view_instruction(view: dict | None) -> str:
+    if not view:
+        return "Viewpoint: keep the camera close to the uploaded photo viewpoint."
+    return f"Viewpoint: {view['instruction']}"
 
 
 def describe_room_mapping(room_analysis: dict) -> list[str]:
