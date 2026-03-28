@@ -3,6 +3,9 @@ import {
   requestRoomAnalysis,
 } from "./services/nanoBanana.js";
 
+const GRID_COLUMNS = 24;
+const GRID_ROWS = 24;
+
 const furnitureCatalog = [
   createCatalogItem({
     id: "sofa",
@@ -86,6 +89,8 @@ render();
 
 function attachEvents() {
   els.roomUpload.addEventListener("change", handleRoomUpload);
+  els.roomImage.addEventListener("load", render);
+  window.addEventListener("resize", renderPlacedItems);
   els.furnitureLayer.addEventListener("pointerdown", beginExistingItemDrag);
   els.furnitureLayer.addEventListener("click", handlePlacedItemClick);
   els.roomBoard.addEventListener("dragover", handleBoardDragOver);
@@ -147,6 +152,8 @@ function addCustomItemToLibrary() {
   furnitureCatalog.unshift({
     id: `custom-${crypto.randomUUID()}`,
     name,
+    color: "#8d9aa6",
+    silhouette: "custom",
     imageUrl,
     productUrl,
   });
@@ -205,9 +212,7 @@ function handleBoardDrop(event) {
     return;
   }
 
-  const boardRect = els.roomBoard.getBoundingClientRect();
-  const x = ((event.clientX - boardRect.left) / boardRect.width) * 100;
-  const y = ((event.clientY - boardRect.top) / boardRect.height) * 100;
+  const { x, y } = getPercentPositionFromPointer(event);
   addFurniture(furnitureId, x, y);
 }
 
@@ -223,6 +228,8 @@ function addFurniture(furnitureId, x, y) {
     name: definition.name,
     imageUrl: definition.imageUrl,
     productUrl: definition.productUrl,
+    color: definition.color,
+    silhouette: definition.silhouette,
     x,
     y,
     scale: 100,
@@ -245,11 +252,8 @@ function beginExistingItemDrag(event) {
   state.selectedId = button.dataset.instanceId;
   renderSelectionControls();
 
-  const boardRect = els.roomBoard.getBoundingClientRect();
-
   const move = (moveEvent) => {
-    const x = clampPercent(((moveEvent.clientX - boardRect.left) / boardRect.width) * 100);
-    const y = clampPercent(((moveEvent.clientY - boardRect.top) / boardRect.height) * 100);
+    const { x, y } = getPercentPositionFromPointer(moveEvent);
 
     state.items = state.items.map((item) =>
       item.instanceId === state.selectedId ? { ...item, x, y } : item,
@@ -405,25 +409,36 @@ function render() {
   els.generateScene.disabled = state.isAnalyzingRoom;
   els.toggleGrid.disabled = state.isAnalyzingRoom || !ready;
   els.roomImage.src = state.roomImageDataUrl;
+  syncBoardToImage();
   renderPlacedItems();
   renderSelectionControls();
 }
 
 function renderPlacedItems() {
+  syncBoardToImage();
   els.furnitureLayer.innerHTML = "";
 
   state.items.forEach((item) => {
     const fragment = els.placedTemplate.content.cloneNode(true);
     const button = fragment.querySelector(".placed-item");
+    const model = fragment.querySelector(".placed-item__model");
+    const metrics = getModelMetrics(item);
 
     button.dataset.instanceId = item.instanceId;
     button.style.left = `${item.x}%`;
     button.style.top = `${item.y}%`;
-    button.style.transform = `translate(-50%, -50%) scale(${item.scale / 100}) rotate(${item.rotation}deg) translateY(${item.elevation}px)`;
+    button.style.setProperty("--model-width", `${metrics.width}px`);
+    button.style.setProperty("--model-height", `${metrics.height}px`);
+    button.style.setProperty("--model-depth", `${metrics.depth}px`);
+    button.style.setProperty("--model-color", item.color || "#b9a28d");
+    button.style.setProperty("--shadow-width", `${metrics.shadowWidth}px`);
+    button.style.setProperty("--shadow-height", `${metrics.shadowHeight}px`);
+    button.style.setProperty("--shadow-opacity", `${metrics.shadowOpacity}`);
+    button.style.transform =
+      `translate(-50%, calc(-100% + ${item.elevation}px)) rotate(${item.rotation}deg)`;
     button.classList.toggle("is-selected", item.instanceId === state.selectedId);
-    const image = fragment.querySelector(".placed-item__image");
-    image.src = item.imageUrl;
-    image.alt = item.name;
+    button.dataset.silhouette = item.silhouette || "custom";
+    model.setAttribute("aria-label", item.name);
 
     els.furnitureLayer.appendChild(fragment);
   });
@@ -460,6 +475,74 @@ function getSelectedItem() {
 
 function clampPercent(value) {
   return Math.min(96, Math.max(4, value));
+}
+
+function getPercentPositionFromPointer(event) {
+  const imageRect = getDisplayedImageRect();
+
+  return {
+    x: clampPercent(((event.clientX - imageRect.left) / imageRect.width) * 100),
+    y: clampPercent(((event.clientY - imageRect.top) / imageRect.height) * 100),
+  };
+}
+
+function getDisplayedImageRect() {
+  const boardRect = els.roomBoard.getBoundingClientRect();
+  const naturalWidth = els.roomImage.naturalWidth || boardRect.width || 1;
+  const naturalHeight = els.roomImage.naturalHeight || boardRect.height || 1;
+  const scale = Math.min(boardRect.width / naturalWidth, boardRect.height / naturalHeight);
+  const width = naturalWidth * scale;
+  const height = naturalHeight * scale;
+  const left = boardRect.left + (boardRect.width - width) / 2;
+  const top = boardRect.top + (boardRect.height - height) / 2;
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    leftPercent: ((left - boardRect.left) / boardRect.width) * 100,
+    topPercent: ((top - boardRect.top) / boardRect.height) * 100,
+    widthPercent: (width / boardRect.width) * 100,
+    heightPercent: (height / boardRect.height) * 100,
+  };
+}
+
+function syncBoardToImage() {
+  const ready = Boolean(state.roomImageDataUrl);
+  const imageRect = ready
+    ? getDisplayedImageRect()
+    : { leftPercent: 0, topPercent: 0, widthPercent: 100, heightPercent: 100 };
+
+  els.roomBoard.style.setProperty("--image-left", `${imageRect.leftPercent}%`);
+  els.roomBoard.style.setProperty("--image-top", `${imageRect.topPercent}%`);
+  els.roomBoard.style.setProperty("--image-width", `${imageRect.widthPercent}%`);
+  els.roomBoard.style.setProperty("--image-height", `${imageRect.heightPercent}%`);
+  els.roomBoard.style.setProperty("--grid-columns", String(GRID_COLUMNS));
+  els.roomBoard.style.setProperty("--grid-rows", String(GRID_ROWS));
+}
+
+function getModelMetrics(item) {
+  const base = {
+    sofa: { width: 132, height: 70, depth: 48 },
+    chair: { width: 84, height: 96, depth: 42 },
+    lamp: { width: 56, height: 148, depth: 28 },
+    table: { width: 110, height: 58, depth: 64 },
+    plant: { width: 72, height: 118, depth: 40 },
+    shelf: { width: 86, height: 136, depth: 36 },
+    custom: { width: 104, height: 88, depth: 44 },
+  }[item.silhouette || "custom"];
+
+  const scale = item.scale / 100;
+
+  return {
+    width: Math.round(base.width * scale),
+    height: Math.round(base.height * scale),
+    depth: Math.round(base.depth * scale),
+    shadowWidth: Math.round(base.width * scale * 0.72),
+    shadowHeight: Math.max(12, Math.round(base.depth * scale * 0.32)),
+    shadowOpacity: Math.min(0.45, 0.16 + scale * 0.12),
+  };
 }
 
 function readFileAsDataUrl(file) {
@@ -508,6 +591,8 @@ function createCatalogItem({ id, name, color, silhouette }) {
   return {
     id,
     name,
+    color,
+    silhouette,
     imageUrl: createFurnitureSwatch({ color, silhouette }),
     productUrl: "",
   };
