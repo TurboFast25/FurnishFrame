@@ -20,7 +20,8 @@
   --surface-soft: rgba(255, 255, 255, 0.58);
   --board-start: rgba(255, 255, 255, 0.56);
   --board-end: rgba(255, 255, 255, 0.2);
-  --grid-line: rgba(255, 255, 255, 0.06);
+  --grid-line: rgba(255, 255, 255, 0.16);
+  --grid-major-line: rgba(28, 109, 93, 0.3);
   --image-backdrop: rgba(255, 255, 255, 0.55);
   --viewer-backdrop: rgba(255, 255, 255, 0.28);
   --viewer-radial-a: rgba(255, 255, 255, 0.16);
@@ -51,7 +52,8 @@ body[data-theme="dark"] {
   --surface-soft: rgba(17, 25, 30, 0.88);
   --board-start: rgba(255, 255, 255, 0.03);
   --board-end: rgba(255, 255, 255, 0.01);
-  --grid-line: rgba(255, 255, 255, 0.04);
+  --grid-line: rgba(255, 255, 255, 0.14);
+  --grid-major-line: rgba(94, 209, 189, 0.32);
   --image-backdrop: rgba(255, 255, 255, 0.04);
   --viewer-backdrop: rgba(3, 8, 11, 0.38);
   --viewer-radial-a: rgba(255, 255, 255, 0.05);
@@ -327,14 +329,18 @@ h2 {
   height: var(--image-height);
   pointer-events: none;
   background-image:
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.14)),
-    linear-gradient(to right, rgba(255, 255, 255, 0.16) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(0, 0, 0, 0.18)),
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid-major-line) 2px, transparent 2px),
+    linear-gradient(to bottom, var(--grid-major-line) 2px, transparent 2px);
   background-size:
     100% 100%,
     calc(100% / var(--grid-columns)) 100%,
-    100% calc(100% / var(--grid-rows));
-  opacity: 0.4;
+    100% calc(100% / var(--grid-rows)),
+    calc(100% / 6) 100%,
+    100% calc(100% / 6);
+  opacity: 0.82;
 }
 
 .room-board.grid-hidden::after {
