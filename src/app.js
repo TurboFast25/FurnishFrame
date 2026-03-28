@@ -487,6 +487,7 @@ async function searchSimilarProducts() {
 
   try {
     const result = await requestSimilarProducts({
+      generatedImageDataUrl: activeView.imageDataUrl,
       prompt: els.promptInput.value.trim(),
       roomAnalysis: state.roomAnalysis,
       items: state.items.map(({ name, productUrl }) => ({ name, productUrl })),
@@ -769,6 +770,13 @@ function renderSimilarProducts() {
     query.className = "similar-products__query";
     query.textContent = `Search: ${match.query}`;
     heading.appendChild(query);
+
+    if (match.traits?.length) {
+      const traits = document.createElement("p");
+      traits.className = "similar-products__traits";
+      traits.textContent = `Detected: ${match.traits.join(", ")}`;
+      heading.appendChild(traits);
+    }
 
     section.appendChild(heading);
 

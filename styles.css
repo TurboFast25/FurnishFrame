@@ -602,11 +602,13 @@ textarea {
 
 .similar-products__heading h3,
 .similar-products__query,
+.similar-products__traits,
 .similar-products__empty {
   margin: 0;
 }
 
 .similar-products__query,
+.similar-products__traits,
 .similar-products__empty {
   color: var(--muted);
   font-size: 0.92rem;

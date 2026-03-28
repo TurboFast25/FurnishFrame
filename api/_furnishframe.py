@@ -266,15 +266,34 @@ def extract_generation_result(response: dict) -> dict:
     }
 
 
-def search_similar_products(payload: dict) -> dict:
+def search_similar_products(payload: dict, api_key: str | None = None) -> dict:
     items = payload.get("items")
     if not isinstance(items, list) or not items:
         raise ValueError("items must include at least one staged item")
 
     prompt = str(payload.get("prompt", "")).strip()
     room_type = str((payload.get("roomAnalysis") or {}).get("roomType", "")).strip()
-    searches = []
+    generated_image_data_url = (
+        payload.get("generatedImageDataUrl")
+        or payload.get("imageDataUrl")
+        or payload.get("resultImageDataUrl")
+    )
 
+    query_specs: dict[str, dict[str, object]] = {}
+    if api_key and generated_image_data_url:
+        try:
+            request_body = build_similar_product_query_request(
+                generated_image_data_url,
+                items,
+                prompt,
+                room_type,
+            )
+            response = call_gemini_api(request_body, api_key, ANALYSIS_MODEL)
+            query_specs = extract_similar_product_queries(response)
+        except Exception:
+            query_specs = {}
+
+    searches = []
     for item in items[:6]:
         if not isinstance(item, dict):
             continue
@@ -283,7 +302,12 @@ def search_similar_products(payload: dict) -> dict:
         if not item_name:
             continue
 
-        query = build_product_search_query(item_name, prompt, room_type)
+        spec = query_specs.get(item_name.lower(), {})
+        query = str(spec.get("searchQuery", "")).strip() or build_product_search_query(
+            item_name,
+            prompt,
+            room_type,
+        )
         results = fetch_duckduckgo_results(query)
         searches.append(
             {
@@ -291,11 +315,83 @@ def search_similar_products(payload: dict) -> dict:
                 "query": query,
                 "results": results,
                 "sourceProductUrl": str(item.get("productUrl", "")).strip(),
+                "traits": spec.get("traits", []),
             }
         )
 
     return {"searches": searches}
 
+
+def build_similar_product_query_request(
+    image_data_url: str,
+    items: list[dict],
+    prompt: str,
+    room_type: str,
+) -> dict:
+    mime_type, base64_data = parse_data_url(image_data_url)
+    item_lines = [f"- {str(item.get('name', '')).strip()}" for item in items[:6] if item.get("name")]
+    instructions = [
+        "Analyze the provided generated interior image and produce highly specific shopping search queries.",
+        "Focus only on the staged furniture items listed below.",
+        *item_lines,
+        f"Room type: {room_type or 'unknown'}",
+        f"Style direction: {prompt or 'unspecified'}",
+        "For each listed item, identify the visible design details from the image as precisely as possible.",
+        "Use concise shopping-oriented descriptors like material, color, silhouette, arm style, leg style, finish, upholstery, era, and size impression.",
+        "Return valid JSON only in this format:",
+        '{"items":[{"itemName":string,"searchQuery":string,"traits":[string]}]}',
+        "Make each searchQuery specific enough to find visually similar products, not generic category pages.",
+    ]
+
+    return {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64_data,
+                        }
+                    },
+                    {"text": "\n".join(instructions)},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.2,
+        },
+    }
+
+
+def extract_similar_product_queries(response: dict) -> dict[str, dict[str, object]]:
+    candidates = response.get("candidates") or []
+    if not candidates:
+        raise ValueError("Gemini similar-product query generation returned no candidates")
+
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text_payload = "\n".join(part["text"] for part in parts if part.get("text")).strip()
+    if not text_payload:
+        raise ValueError("Gemini similar-product query generation returned no JSON payload")
+
+    parsed = json.loads(strip_json_fence(text_payload))
+    items = parsed.get("items")
+    if not isinstance(items, list):
+        return {}
+
+    results = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_name = str(item.get("itemName", "")).strip()
+        if not item_name:
+            continue
+        results[item_name.lower()] = {
+            "searchQuery": str(item.get("searchQuery", "")).strip(),
+            "traits": normalize_strings(item.get("traits")),
+        }
+
+    return results
 
 def build_product_search_query(item_name: str, prompt: str, room_type: str) -> str:
     style_terms = re.findall(r"[A-Za-z][A-Za-z-]+", prompt.lower())
