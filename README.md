@@ -22,7 +22,7 @@ This scaffold is dependency-free.
 Example:
 
 ```bash
-export GEMINI_API_KEY=your_key_here
+export GEMINI_API_KEY='your_key_here'
 python3 server.py
 ```
 
