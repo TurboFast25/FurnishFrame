@@ -1,4 +1,4 @@
-# RoomVis
+# FurnishFrame
 
 Basic framework for a room-staging web app that:
 
@@ -51,8 +51,8 @@ vercel --prod
 
 Optional environment variables:
 
-- `ROOMVIS_GEMINI_MODEL`
-- `ROOMVIS_ANALYSIS_MODEL`
+- `FURNISHFRAME_GEMINI_MODEL`
+- `FURNISHFRAME_ANALYSIS_MODEL`
 
 After the first `vercel` link step, subsequent production deploys are just:
 

@@ -1,6 +1,6 @@
 from http.server import BaseHTTPRequestHandler
 
-from api._roomvis import (
+from api._furnishframe import (
     ANALYSIS_MODEL,
     build_analysis_request,
     call_gemini_api,
@@ -23,4 +23,3 @@ class handler(BaseHTTPRequestHandler):
             json_response(self, 200, extract_analysis_result(gemini_response))
         except Exception as error:  # pragma: no cover - Vercel runtime path
             handle_api_error(self, error)
-

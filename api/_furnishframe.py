@@ -7,8 +7,8 @@ import urllib.request
 from http import HTTPStatus
 
 
-MODEL = os.environ.get("ROOMVIS_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
-ANALYSIS_MODEL = os.environ.get("ROOMVIS_ANALYSIS_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("FURNISHFRAME_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
+ANALYSIS_MODEL = os.environ.get("FURNISHFRAME_ANALYSIS_MODEL", "gemini-2.5-flash")
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 
 

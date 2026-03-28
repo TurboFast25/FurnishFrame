@@ -5,7 +5,7 @@ import {
 
 const GRID_COLUMNS = 24;
 const GRID_ROWS = 24;
-const THEME_STORAGE_KEY = "roomvis-theme";
+const THEME_STORAGE_KEY = "furnishframe-theme";
 
 const furnitureCatalog = [
   createCatalogItem({

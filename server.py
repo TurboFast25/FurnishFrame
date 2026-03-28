@@ -11,13 +11,13 @@ from pathlib import Path
 
 HOST = "127.0.0.1"
 PORT = 4173
-MODEL = os.environ.get("ROOMVIS_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
-ANALYSIS_MODEL = os.environ.get("ROOMVIS_ANALYSIS_MODEL", "gemini-2.5-flash")
+MODEL = os.environ.get("FURNISHFRAME_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
+ANALYSIS_MODEL = os.environ.get("FURNISHFRAME_ANALYSIS_MODEL", "gemini-2.5-flash")
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 WEB_ROOT = Path(__file__).resolve().parent
 
 
-class RoomVisHandler(SimpleHTTPRequestHandler):
+class FurnishFrameHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
@@ -345,6 +345,6 @@ def clamp_percent(value: object) -> float:
 
 
 if __name__ == "__main__":
-    server = ThreadingHTTPServer((HOST, PORT), RoomVisHandler)
-    print(f"Serving RoomVis at http://{HOST}:{PORT}")
+    server = ThreadingHTTPServer((HOST, PORT), FurnishFrameHandler)
+    print(f"Serving FurnishFrame at http://{HOST}:{PORT}")
     server.serve_forever()
