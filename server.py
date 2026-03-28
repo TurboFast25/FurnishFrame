@@ -12,6 +12,7 @@ from pathlib import Path
 HOST = "127.0.0.1"
 PORT = 4173
 MODEL = os.environ.get("ROOMVIS_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
+ANALYSIS_MODEL = os.environ.get("ROOMVIS_ANALYSIS_MODEL", "gemini-2.5-flash")
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 WEB_ROOT = Path(__file__).resolve().parent
 
@@ -21,7 +22,7 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def do_POST(self) -> None:
-        if self.path != "/api/generate":
+        if self.path not in {"/api/generate", "/api/analyze"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
             return
 
@@ -36,9 +37,14 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
         try:
             content_length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(content_length))
-            request_body = build_gemini_request(payload)
-            gemini_response = call_gemini_api(request_body, api_key)
-            result = extract_generation_result(gemini_response)
+            if self.path == "/api/analyze":
+                request_body = build_analysis_request(payload)
+                gemini_response = call_gemini_api(request_body, api_key, ANALYSIS_MODEL)
+                result = extract_analysis_result(gemini_response)
+            else:
+                request_body = build_gemini_request(payload)
+                gemini_response = call_gemini_api(request_body, api_key, MODEL)
+                result = extract_generation_result(gemini_response)
         except ValueError as exc:
             self.respond_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
@@ -69,6 +75,7 @@ class RoomVisHandler(SimpleHTTPRequestHandler):
 
 def build_gemini_request(payload: dict) -> dict:
     room_image_data_url = payload.get("roomImageDataUrl")
+    room_analysis = payload.get("roomAnalysis") or {}
     furniture = payload.get("furniture", [])
     user_prompt = str(payload.get("prompt", "")).strip()
 
@@ -81,9 +88,12 @@ def build_gemini_request(payload: dict) -> dict:
         f"with scale {item['scale']} and rotation {item['rotation']} degrees"
         for item in furniture
     ]
+    mapping_lines = describe_room_mapping(room_analysis)
 
     prompt_parts = [
         "Use the provided room photo as the base image.",
+        "Use the structured room analysis below as the primary scene map instead of relying only on the raw image.",
+        *mapping_lines,
         "Stage the room photorealistically with the following furniture placements.",
         "\n".join(furniture_lines) if furniture_lines else "- No extra furniture placements were supplied.",
         "Preserve room geometry, perspective, and lighting unless explicitly changed.",
@@ -115,6 +125,53 @@ def build_gemini_request(payload: dict) -> dict:
     }
 
 
+def build_analysis_request(payload: dict) -> dict:
+    room_image_data_url = payload.get("roomImageDataUrl")
+    if not room_image_data_url:
+        raise ValueError("roomImageDataUrl is required")
+
+    mime_type, base64_data = parse_data_url(room_image_data_url)
+    prompt = "\n".join(
+        [
+            "Analyze this room photo and return a compact JSON room map for furniture staging.",
+            "Return valid JSON only with these keys:",
+            '{'
+            '"summary": string,'
+            '"roomType": string,'
+            '"cameraView": string,'
+            '"floorPolygon": [{"x": number, "y": number}],'
+            '"wallZones": [{"name": string, "x": number, "y": number, "width": number, "height": number}],'
+            '"avoidZones": [{"name": string, "x": number, "y": number, "width": number, "height": number}],'
+            '"placementGuidance": [string],'
+            '"lighting": string'
+            '}',
+            "Use percentages from 0 to 100 for every x, y, width, and height field.",
+            "Keep floorPolygon to 3-6 points that approximate the visible walkable floor.",
+            "Be concrete and concise.",
+        ]
+    )
+
+    return {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": base64_data,
+                        }
+                    },
+                    {"text": prompt},
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "temperature": 0.2,
+        },
+    }
+
+
 def parse_data_url(data_url: str) -> tuple[str, str]:
     if not data_url.startswith("data:") or "," not in data_url:
         raise ValueError("roomImageDataUrl must be a valid data URL")
@@ -130,8 +187,8 @@ def parse_data_url(data_url: str) -> tuple[str, str]:
     return mime_type, encoded
 
 
-def call_gemini_api(request_body: dict, api_key: str) -> dict:
-    url = f"{API_ROOT}/{MODEL}:generateContent"
+def call_gemini_api(request_body: dict, api_key: str, model: str) -> dict:
+    url = f"{API_ROOT}/{model}:generateContent"
     request = urllib.request.Request(
         url,
         data=json.dumps(request_body).encode("utf-8"),
@@ -169,6 +226,114 @@ def extract_generation_result(response: dict) -> dict:
             "text": "\n".join(text_parts).strip() or "No text response.",
         },
     }
+
+
+def extract_analysis_result(response: dict) -> dict:
+    candidates = response.get("candidates") or []
+    if not candidates:
+        raise ValueError("Gemini analysis did not include any candidates")
+
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    text_payload = "\n".join(part["text"] for part in parts if part.get("text")).strip()
+    if not text_payload:
+        raise ValueError("Gemini analysis did not include a JSON response")
+
+    cleaned_payload = strip_json_fence(text_payload)
+
+    try:
+        parsed = json.loads(cleaned_payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Could not parse room analysis JSON: {exc}") from exc
+
+    return {
+        "summary": str(parsed.get("summary", "")).strip(),
+        "roomType": str(parsed.get("roomType", "")).strip(),
+        "cameraView": str(parsed.get("cameraView", "")).strip(),
+        "floorPolygon": normalize_points(parsed.get("floorPolygon")),
+        "wallZones": normalize_rects(parsed.get("wallZones")),
+        "avoidZones": normalize_rects(parsed.get("avoidZones")),
+        "placementGuidance": normalize_strings(parsed.get("placementGuidance")),
+        "lighting": str(parsed.get("lighting", "")).strip(),
+        "model": ANALYSIS_MODEL,
+    }
+
+
+def strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if len(lines) >= 3:
+            return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def describe_room_mapping(room_analysis: dict) -> list[str]:
+    if not room_analysis:
+        return ["- No structured room analysis was supplied."]
+
+    floor_polygon = room_analysis.get("floorPolygon") or []
+    wall_zones = room_analysis.get("wallZones") or []
+    avoid_zones = room_analysis.get("avoidZones") or []
+    guidance = room_analysis.get("placementGuidance") or []
+
+    return [
+        f"- Room summary: {room_analysis.get('summary') or 'Unknown room layout.'}",
+        f"- Room type: {room_analysis.get('roomType') or 'unknown'}",
+        f"- Camera view: {room_analysis.get('cameraView') or 'unknown'}",
+        f"- Lighting: {room_analysis.get('lighting') or 'unspecified'}",
+        f"- Floor polygon: {json.dumps(floor_polygon)}",
+        f"- Wall zones: {json.dumps(wall_zones)}",
+        f"- Avoid zones: {json.dumps(avoid_zones)}",
+        f"- Placement guidance: {'; '.join(guidance) if guidance else 'none'}",
+    ]
+
+
+def normalize_points(value: object) -> list[dict[str, float]]:
+    if not isinstance(value, list):
+        return []
+
+    points: list[dict[str, float]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        if "x" not in item or "y" not in item:
+            continue
+        points.append({"x": clamp_percent(item["x"]), "y": clamp_percent(item["y"])})
+    return points
+
+
+def normalize_rects(value: object) -> list[dict[str, float | str]]:
+    if not isinstance(value, list):
+        return []
+
+    rects: list[dict[str, float | str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        rects.append(
+            {
+                "name": str(item.get("name", "")).strip(),
+                "x": clamp_percent(item.get("x", 0)),
+                "y": clamp_percent(item.get("y", 0)),
+                "width": clamp_percent(item.get("width", 0)),
+                "height": clamp_percent(item.get("height", 0)),
+            }
+        )
+    return rects
+
+
+def normalize_strings(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def clamp_percent(value: object) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(100.0, numeric))
 
 
 if __name__ == "__main__":

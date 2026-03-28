@@ -226,12 +226,6 @@ h2 {
 }
 
 .room-board {
-  --image-left: 0%;
-  --image-top: 0%;
-  --image-width: 100%;
-  --image-height: 100%;
-  --grid-columns: 24;
-  --grid-rows: 24;
   position: absolute;
   inset: 0;
   display: none;
@@ -251,28 +245,14 @@ h2 {
   height: var(--image-height);
   pointer-events: none;
   background-image:
-    linear-gradient(
-      to bottom,
-      rgba(95, 171, 255, 0) 0%,
-      rgba(95, 171, 255, 0) 56%,
-      rgba(45, 129, 255, 0.1) 70%,
-      rgba(9, 74, 177, 0.3) 100%
-    ),
-    linear-gradient(to right, rgba(101, 196, 255, 0.82) 2px, transparent 2px),
-    linear-gradient(to bottom, rgba(101, 196, 255, 0.72) 2px, transparent 2px);
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.14)),
+    linear-gradient(to right, rgba(255, 255, 255, 0.16) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
   background-size:
     100% 100%,
     calc(100% / var(--grid-columns)) 100%,
     100% calc(100% / var(--grid-rows));
-  background-position:
-    center,
-    center,
-    center;
-  clip-path: polygon(14% 56%, 86% 56%, 100% 100%, 0 100%);
-  transform-origin: center bottom;
-  transform: perspective(920px) rotateX(69deg);
-  opacity: 0.72;
-  mix-blend-mode: screen;
+  opacity: 0.4;
 }
 
 .room-board.grid-hidden::after {
@@ -282,10 +262,9 @@ h2 {
 .room-image,
 .furniture-layer {
   position: absolute;
-  left: var(--image-left);
-  top: var(--image-top);
-  width: var(--image-width);
-  height: var(--image-height);
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .room-image {
@@ -309,63 +288,31 @@ h2 {
 
 .placed-item {
   position: absolute;
-  width: 96px;
-  height: 72px;
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
   border: 2px solid transparent;
-  background: transparent;
-  border-radius: 30px;
-  padding: 0;
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 24px;
+  box-shadow: 0 22px 24px rgba(31, 21, 13, 0.14);
   transform: translate(-50%, -50%);
   cursor: grab;
-  overflow: visible;
 }
 
 .placed-item.is-selected {
-  filter: drop-shadow(0 0 0.7rem rgba(243, 179, 76, 0.52));
+  border-color: var(--highlight);
 }
 
 .placed-item:active {
   cursor: grabbing;
 }
 
-.placed-item__shadow {
-  position: absolute;
-  left: 50%;
-  bottom: calc(-1 * var(--shadow-offset, 12px));
-  width: var(--shadow-width, 84px);
-  height: var(--shadow-height, 22px);
-  border-radius: 999px;
-  background: rgba(27, 16, 12, var(--shadow-opacity, 0.26));
-  transform: translateX(-50%);
-  filter: blur(var(--shadow-blur, 18px));
-}
-
-.placed-item__surface {
-  position: absolute;
-  inset: 0;
-  display: block;
-  overflow: hidden;
-  border: 2px solid rgba(255, 255, 255, 0.72);
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, var(--surface-sheen, 0.2)), rgba(255, 255, 255, 0.02)),
-    rgba(255, 250, 244, 0.5);
-  box-shadow:
-    0 calc(var(--surface-lift, 14px) * 0.55) calc(var(--surface-lift, 14px) * 1.1) rgba(24, 17, 14, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  transform-origin: center bottom;
-  transform: perspective(900px) rotateX(var(--surface-tilt, 48deg));
-  backdrop-filter: blur(2px);
-}
-
 .placed-item__image {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   border-radius: 20px;
-  display: block;
-  filter: drop-shadow(0 8px 12px rgba(16, 18, 22, 0.18)) saturate(1.06);
 }
 
 .inspector {

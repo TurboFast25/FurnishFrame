@@ -1,7 +1,7 @@
-import { requestNanoBananaGeneration } from "./services/nanoBanana.js";
-
-const GRID_COLUMNS = 24;
-const GRID_ROWS = 24;
+import {
+  requestNanoBananaGeneration,
+  requestRoomAnalysis,
+} from "./services/nanoBanana.js";
 
 const furnitureCatalog = [
   createCatalogItem({
@@ -46,6 +46,8 @@ const state = {
   items: [],
   selectedId: null,
   roomImageDataUrl: "",
+  roomAnalysis: null,
+  isAnalyzingRoom: false,
   showGrid: false,
 };
 
@@ -84,8 +86,6 @@ render();
 
 function attachEvents() {
   els.roomUpload.addEventListener("change", handleRoomUpload);
-  els.roomImage.addEventListener("load", render);
-  window.addEventListener("resize", renderPlacedItems);
   els.furnitureLayer.addEventListener("pointerdown", beginExistingItemDrag);
   els.furnitureLayer.addEventListener("click", handlePlacedItemClick);
   els.roomBoard.addEventListener("dragover", handleBoardDragOver);
@@ -127,7 +127,7 @@ function renderFurnitureLibrary() {
         return;
       }
 
-      addFurniture(entry.id, Math.floor(GRID_COLUMNS / 2), Math.floor(GRID_ROWS / 2));
+      addFurniture(entry.id, 50, 50);
     });
 
     els.furnitureLibrary.appendChild(fragment);
@@ -158,21 +158,36 @@ function addCustomItemToLibrary() {
   setLog(`Added "${name}" to the furniture library.`);
 }
 
-function handleRoomUpload(event) {
+async function handleRoomUpload(event) {
   const [file] = event.target.files ?? [];
   if (!file) {
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = () => {
-    state.roomImageDataUrl = String(reader.result);
-    state.items = [];
-    state.selectedId = null;
+  state.isAnalyzingRoom = true;
+  state.roomImageDataUrl = "";
+  state.roomAnalysis = null;
+  state.items = [];
+  state.selectedId = null;
+  render();
+  setLog(`Analyzing ${file.name} to build a room map...`);
+
+  try {
+    const roomImageDataUrl = await readFileAsDataUrl(file);
+    const analysis = await requestRoomAnalysis({ roomImageDataUrl });
+
+    state.roomImageDataUrl = roomImageDataUrl;
+    state.roomAnalysis = analysis;
+    setLog(formatRoomAnalysisLog(file.name, analysis));
+  } catch (error) {
+    state.roomImageDataUrl = "";
+    state.roomAnalysis = null;
+    event.target.value = "";
+    setLog(`Image analysis failed: ${error.message}`);
+  } finally {
+    state.isAnalyzingRoom = false;
     render();
-    setLog(`Loaded room image: ${file.name}`);
-  };
-  reader.readAsDataURL(file);
+  }
 }
 
 function handleBoardDragOver(event) {
@@ -190,18 +205,17 @@ function handleBoardDrop(event) {
     return;
   }
 
-  const { column, row } = getGridPositionFromPointer(event);
-  addFurniture(furnitureId, column, row);
+  const boardRect = els.roomBoard.getBoundingClientRect();
+  const x = ((event.clientX - boardRect.left) / boardRect.width) * 100;
+  const y = ((event.clientY - boardRect.top) / boardRect.height) * 100;
+  addFurniture(furnitureId, x, y);
 }
 
-function addFurniture(furnitureId, column, row) {
+function addFurniture(furnitureId, x, y) {
   const definition = furnitureCatalog.find((item) => item.id === furnitureId);
   if (!definition) {
     return;
   }
-
-  const safeColumn = clampGridIndex(column, GRID_COLUMNS);
-  const safeRow = clampGridIndex(row, GRID_ROWS);
 
   const nextItem = {
     instanceId: crypto.randomUUID(),
@@ -209,8 +223,8 @@ function addFurniture(furnitureId, column, row) {
     name: definition.name,
     imageUrl: definition.imageUrl,
     productUrl: definition.productUrl,
-    gridColumn: safeColumn,
-    gridRow: safeRow,
+    x,
+    y,
     scale: 100,
     rotation: 0,
     elevation: 0,
@@ -231,13 +245,14 @@ function beginExistingItemDrag(event) {
   state.selectedId = button.dataset.instanceId;
   renderSelectionControls();
 
+  const boardRect = els.roomBoard.getBoundingClientRect();
+
   const move = (moveEvent) => {
-    const { column, row } = getGridPositionFromPointer(moveEvent);
+    const x = clampPercent(((moveEvent.clientX - boardRect.left) / boardRect.width) * 100);
+    const y = clampPercent(((moveEvent.clientY - boardRect.top) / boardRect.height) * 100);
 
     state.items = state.items.map((item) =>
-      item.instanceId === state.selectedId
-        ? { ...item, gridColumn: column, gridRow: row }
-        : item,
+      item.instanceId === state.selectedId ? { ...item, x, y } : item,
     );
 
     renderPlacedItems();
@@ -306,6 +321,8 @@ function resetRoom() {
   state.items = [];
   state.selectedId = null;
   state.roomImageDataUrl = "";
+  state.roomAnalysis = null;
+  state.isAnalyzingRoom = false;
   els.roomUpload.value = "";
   render();
   setLog("Room reset. Upload a new image to start again.");
@@ -342,24 +359,24 @@ async function generateScene() {
     return;
   }
 
+  if (!state.roomAnalysis) {
+    setLog("Generation skipped: room mapping has not finished yet.");
+    return;
+  }
+
   const payload = {
     roomImageDataUrl: state.roomImageDataUrl,
+    roomAnalysis: state.roomAnalysis,
     prompt: els.promptInput.value.trim(),
-    furniture: state.items.map(
-      ({ name, imageUrl, productUrl, gridColumn, gridRow, scale, rotation }) => {
-        const { x, y } = getPercentPositionFromGrid(gridColumn, gridRow);
-
-        return {
-          name,
-          imageUrl,
-          productUrl,
-          x,
-          y,
-          scale,
-          rotation,
-        };
-      },
-    ),
+    furniture: state.items.map(({ name, imageUrl, productUrl, x, y, scale, rotation }) => ({
+      name,
+      imageUrl,
+      productUrl,
+      x,
+      y,
+      scale,
+      rotation,
+    })),
   };
 
   setLog("Submitting staged room payload to Nano Banana service...");
@@ -382,38 +399,27 @@ function render() {
   const ready = Boolean(state.roomImageDataUrl);
   els.roomBoard.classList.toggle("is-ready", ready);
   els.dropHint.hidden = ready;
+  els.dropHint.textContent = state.isAnalyzingRoom
+    ? "Analyzing room image and building a placement map..."
+    : "Upload a room image to start staging the scene.";
+  els.generateScene.disabled = state.isAnalyzingRoom;
+  els.toggleGrid.disabled = state.isAnalyzingRoom || !ready;
   els.roomImage.src = state.roomImageDataUrl;
-  syncBoardToImage();
   renderPlacedItems();
   renderSelectionControls();
 }
 
 function renderPlacedItems() {
-  syncBoardToImage();
   els.furnitureLayer.innerHTML = "";
-  const imageRect = getDisplayedImageRect();
 
   state.items.forEach((item) => {
     const fragment = els.placedTemplate.content.cloneNode(true);
     const button = fragment.querySelector(".placed-item");
-    const { x, y } = getPercentPositionFromGrid(item.gridColumn, item.gridRow);
-    const placement = getArPlacementStyle(item, imageRect);
 
     button.dataset.instanceId = item.instanceId;
-    button.style.left = `${x}%`;
-    button.style.top = `${y}%`;
-    button.style.width = `${placement.width}px`;
-    button.style.height = `${placement.height}px`;
-    button.style.setProperty("--surface-tilt", `${placement.tilt}deg`);
-    button.style.setProperty("--surface-lift", `${placement.lift}px`);
-    button.style.setProperty("--surface-sheen", placement.sheen);
-    button.style.setProperty("--shadow-width", `${placement.shadowWidth}px`);
-    button.style.setProperty("--shadow-height", `${placement.shadowHeight}px`);
-    button.style.setProperty("--shadow-blur", `${placement.shadowBlur}px`);
-    button.style.setProperty("--shadow-opacity", placement.shadowOpacity);
-    button.style.setProperty("--shadow-offset", `${placement.shadowOffset}px`);
-    button.style.transform =
-      `translate(-50%, -50%) translateY(${item.elevation}px) rotate(${item.rotation}deg)`;
+    button.style.left = `${item.x}%`;
+    button.style.top = `${item.y}%`;
+    button.style.transform = `translate(-50%, -50%) scale(${item.scale / 100}) rotate(${item.rotation}deg) translateY(${item.elevation}px)`;
     button.classList.toggle("is-selected", item.instanceId === state.selectedId);
     const image = fragment.querySelector(".placed-item__image");
     image.src = item.imageUrl;
@@ -421,26 +427,6 @@ function renderPlacedItems() {
 
     els.furnitureLayer.appendChild(fragment);
   });
-}
-
-function getArPlacementStyle(item, imageRect) {
-  const depth = (item.gridRow + 1) / GRID_ROWS;
-  const scaledWidth = imageRect.width * (0.06 + depth * 0.08) * (item.scale / 100);
-  const width = clampValue(scaledWidth, 56, imageRect.width * 0.26);
-  const height = width * (0.62 + depth * 0.12);
-
-  return {
-    width,
-    height,
-    tilt: 58 - depth * 28,
-    lift: 10 + depth * 14,
-    sheen: String(0.12 + depth * 0.16),
-    shadowWidth: width * (0.72 + depth * 0.24),
-    shadowHeight: 12 + depth * 14,
-    shadowBlur: 16 + depth * 18,
-    shadowOpacity: String(0.18 + depth * 0.24),
-    shadowOffset: 8 + depth * 12,
-  };
 }
 
 function renderSelectionControls() {
@@ -472,70 +458,32 @@ function getSelectedItem() {
   return state.items.find((item) => item.instanceId === state.selectedId) ?? null;
 }
 
-function getGridPositionFromPointer(event) {
-  const imageRect = getDisplayedImageRect();
-  const relativeX = clamp01((event.clientX - imageRect.left) / imageRect.width);
-  const relativeY = clamp01((event.clientY - imageRect.top) / imageRect.height);
-
-  return {
-    column: Math.min(GRID_COLUMNS - 1, Math.floor(relativeX * GRID_COLUMNS)),
-    row: Math.min(GRID_ROWS - 1, Math.floor(relativeY * GRID_ROWS)),
-  };
+function clampPercent(value) {
+  return Math.min(96, Math.max(4, value));
 }
 
-function getPercentPositionFromGrid(column, row) {
-  return {
-    x: ((column + 0.5) / GRID_COLUMNS) * 100,
-    y: ((row + 0.5) / GRID_ROWS) * 100,
-  };
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read the selected file."));
+    reader.readAsDataURL(file);
+  });
 }
 
-function getDisplayedImageRect() {
-  const boardRect = els.roomBoard.getBoundingClientRect();
-  const naturalWidth = els.roomImage.naturalWidth || boardRect.width || 1;
-  const naturalHeight = els.roomImage.naturalHeight || boardRect.height || 1;
-  const scale = Math.min(boardRect.width / naturalWidth, boardRect.height / naturalHeight);
-  const width = naturalWidth * scale;
-  const height = naturalHeight * scale;
-  const left = boardRect.left + (boardRect.width - width) / 2;
-  const top = boardRect.top + (boardRect.height - height) / 2;
+function formatRoomAnalysisLog(fileName, analysis) {
+  const summary = analysis.summary || "No summary returned.";
+  const floor = analysis.floorPolygon?.length
+    ? `${analysis.floorPolygon.length} floor anchor points`
+    : "no floor polygon";
+  const guidance = analysis.placementGuidance?.join(", ") || "no placement guidance";
 
-  return {
-    left,
-    top,
-    width,
-    height,
-    leftPercent: (left - boardRect.left) / boardRect.width * 100,
-    topPercent: (top - boardRect.top) / boardRect.height * 100,
-    widthPercent: width / boardRect.width * 100,
-    heightPercent: height / boardRect.height * 100,
-  };
-}
-
-function syncBoardToImage() {
-  const ready = Boolean(state.roomImageDataUrl);
-  const imageRect = ready
-    ? getDisplayedImageRect()
-    : { leftPercent: 0, topPercent: 0, widthPercent: 100, heightPercent: 100 };
-
-  els.roomBoard.style.setProperty("--image-left", `${imageRect.leftPercent}%`);
-  els.roomBoard.style.setProperty("--image-top", `${imageRect.topPercent}%`);
-  els.roomBoard.style.setProperty("--image-width", `${imageRect.widthPercent}%`);
-  els.roomBoard.style.setProperty("--image-height", `${imageRect.heightPercent}%`);
-  els.roomBoard.style.setProperty("--grid-columns", String(GRID_COLUMNS));
-  els.roomBoard.style.setProperty("--grid-rows", String(GRID_ROWS));
-}
-
-function clamp01(value) {
-  return Math.min(0.999999, Math.max(0, value));
-}
-
-function clampGridIndex(value, size) {
-  return Math.min(size - 1, Math.max(0, Math.round(value)));
-}
-
-function clampValue(value, min, max) {
-  return Math.min(max, Math.max(min, value));
+  return [
+    `Mapped ${fileName} before upload staging.`,
+    `Summary: ${summary}`,
+    `Detected: ${floor}.`,
+    `Placement guidance: ${guidance}.`,
+  ].join("\n");
 }
 
 function setLog(message) {
