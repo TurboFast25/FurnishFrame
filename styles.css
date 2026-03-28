@@ -241,6 +241,7 @@ h2 {
   min-width: 0;
   display: grid;
   gap: 4px;
+  margin-left: -7px;
 }
 
 .furniture-name,
