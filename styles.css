@@ -71,6 +71,7 @@ body {
 }
 
 body {
+  color-scheme: light;
   font-family: "Space Grotesk", sans-serif;
   color: var(--ink);
   background:
@@ -79,10 +80,24 @@ body {
     linear-gradient(135deg, var(--body-start) 0%, var(--body-mid) 48%, var(--body-end) 100%);
 }
 
+body[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 button,
 input,
 textarea {
   font: inherit;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+label {
+  color: var(--ink);
 }
 
 input[type="text"],
