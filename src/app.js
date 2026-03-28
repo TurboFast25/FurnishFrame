@@ -1,6 +1,7 @@
 import {
   requestRoomAnalysis,
   requestNanoBananaGeneration,
+  requestSimilarProducts,
 } from "./services/nanoBanana.js";
 
 const GRID_COLUMNS = 24;
@@ -65,6 +66,8 @@ const state = {
   },
   generatedTour: [],
   activeViewId: "",
+  similarProductMatches: [],
+  isSearchingProducts: false,
 };
 
 const els = {
@@ -84,6 +87,7 @@ const els = {
   promptInput: document.querySelector("#prompt-input"),
   generationLog: document.querySelector("#generation-log"),
   generateScene: document.querySelector("#generate-scene"),
+  searchSimilar: document.querySelector("#search-similar"),
   resetRoom: document.querySelector("#reset-room"),
   toggleGrid: document.querySelector("#toggle-grid"),
   toggleTheme: document.querySelector("#toggle-theme"),
@@ -93,6 +97,7 @@ const els = {
   resultViewer: document.querySelector("#result-viewer"),
   resultViewerHint: document.querySelector("#result-viewer-hint"),
   resultPlaceholder: document.querySelector("#result-placeholder"),
+  similarProducts: document.querySelector("#similar-products"),
   resultStatus: document.querySelector("#result-status"),
   customItemName: document.querySelector("#custom-item-name"),
   customItemImage: document.querySelector("#custom-item-image"),
@@ -123,6 +128,7 @@ function attachEvents() {
   els.depthControl.addEventListener("input", updateSelectedItemFromControls);
   els.removeItem.addEventListener("click", removeSelectedItem);
   els.generateScene.addEventListener("click", generateScene);
+  els.searchSimilar.addEventListener("click", searchSimilarProducts);
   els.resetRoom.addEventListener("click", resetRoom);
   els.toggleGrid.addEventListener("click", toggleGrid);
   els.toggleTheme.addEventListener("click", toggleTheme);
@@ -373,9 +379,12 @@ function resetRoom() {
   state.isAnalyzingRoom = false;
   state.generatedTour = [];
   state.activeViewId = "";
+  state.similarProductMatches = [];
+  state.isSearchingProducts = false;
   els.roomUpload.value = "";
   render();
   setResultState({ status: "No output yet", views: [], activeViewId: "" });
+  renderSimilarProducts();
   setLog("Room reset. Upload a new image to start again.");
 }
 
@@ -432,6 +441,9 @@ async function generateScene() {
   };
 
   setLog("Submitting staged room payload to Nano Banana image service...");
+  state.similarProductMatches = [];
+  state.isSearchingProducts = false;
+  renderSimilarProducts();
   setResultState({ status: "Generating...", views: [], activeViewId: "" });
 
   try {
@@ -457,6 +469,39 @@ async function generateScene() {
   }
 }
 
+async function searchSimilarProducts() {
+  const activeView = getActiveGeneratedView();
+  if (!activeView?.imageDataUrl) {
+    setLog("Similar product search skipped: generate a room image first.");
+    return;
+  }
+
+  if (!state.items.length) {
+    setLog("Similar product search skipped: add at least one staged item first.");
+    return;
+  }
+
+  state.isSearchingProducts = true;
+  updateSimilarSearchButton();
+  setLog("Searching the web for similar product matches...");
+
+  try {
+    const result = await requestSimilarProducts({
+      prompt: els.promptInput.value.trim(),
+      roomAnalysis: state.roomAnalysis,
+      items: state.items.map(({ name, productUrl }) => ({ name, productUrl })),
+    });
+    state.similarProductMatches = result.searches || [];
+    renderSimilarProducts();
+    setLog("Similar product search complete.");
+  } catch (error) {
+    setLog(`Similar product search failed: ${error.message}`);
+  } finally {
+    state.isSearchingProducts = false;
+    updateSimilarSearchButton();
+  }
+}
+
 function render() {
   const ready = Boolean(state.roomImageDataUrl);
   els.roomBoard.classList.toggle("is-ready", ready);
@@ -467,6 +512,7 @@ function render() {
   els.generateScene.disabled = state.isAnalyzingRoom;
   els.toggleGrid.disabled = state.isAnalyzingRoom || !ready;
   els.roomImage.src = state.roomImageDataUrl;
+  updateSimilarSearchButton();
   syncBoardToImage();
   renderPlacedItems();
   renderSelectionControls();
@@ -637,6 +683,7 @@ function setResultState({ status, views, activeViewId }) {
   state.generatedTour = views || [];
   state.activeViewId = activeViewId || state.generatedTour[0]?.id || "";
   renderResultNav();
+  updateSimilarSearchButton();
 
   const activeView = getActiveGeneratedView();
   if (!activeView?.imageDataUrl) {
@@ -689,6 +736,85 @@ function renderResultNav() {
 
 function getActiveGeneratedView() {
   return state.generatedTour.find((view) => view.id === state.activeViewId) ?? null;
+}
+
+function updateSimilarSearchButton() {
+  const canSearch = Boolean(getActiveGeneratedView()?.imageDataUrl) && state.items.length > 0;
+  els.searchSimilar.disabled = !canSearch || state.isSearchingProducts;
+  els.searchSimilar.textContent = state.isSearchingProducts
+    ? "Searching Products..."
+    : "Find Similar Products";
+}
+
+function renderSimilarProducts() {
+  els.similarProducts.innerHTML = "";
+
+  if (!state.similarProductMatches.length) {
+    els.similarProducts.hidden = true;
+    return;
+  }
+
+  state.similarProductMatches.forEach((match) => {
+    const section = document.createElement("section");
+    section.className = "similar-products__group";
+
+    const heading = document.createElement("div");
+    heading.className = "similar-products__heading";
+
+    const title = document.createElement("h3");
+    title.textContent = match.itemName;
+    heading.appendChild(title);
+
+    const query = document.createElement("p");
+    query.className = "similar-products__query";
+    query.textContent = `Search: ${match.query}`;
+    heading.appendChild(query);
+
+    section.appendChild(heading);
+
+    if (match.sourceProductUrl) {
+      const original = document.createElement("a");
+      original.className = "similar-products__original";
+      original.href = match.sourceProductUrl;
+      original.target = "_blank";
+      original.rel = "noreferrer";
+      original.textContent = "Open linked product";
+      section.appendChild(original);
+    }
+
+    const list = document.createElement("div");
+    list.className = "similar-products__list";
+
+    if (!match.results?.length) {
+      const empty = document.createElement("p");
+      empty.className = "similar-products__empty";
+      empty.textContent = "No similar products found for this item.";
+      list.appendChild(empty);
+    } else {
+      match.results.forEach((result) => {
+        const link = document.createElement("a");
+        link.className = "similar-products__card";
+        link.href = result.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+
+        const resultTitle = document.createElement("strong");
+        resultTitle.textContent = result.title;
+        link.appendChild(resultTitle);
+
+        const meta = document.createElement("span");
+        meta.textContent = result.displayUrl || result.url;
+        link.appendChild(meta);
+
+        list.appendChild(link);
+      });
+    }
+
+    section.appendChild(list);
+    els.similarProducts.appendChild(section);
+  });
+
+  els.similarProducts.hidden = false;
 }
 
 function beginResultViewerDrag(event) {

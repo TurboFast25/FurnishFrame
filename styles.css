@@ -581,6 +581,63 @@ textarea {
   margin: 0;
 }
 
+.similar-products {
+  display: grid;
+  gap: 14px;
+}
+
+.similar-products__group {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.similar-products__heading {
+  display: grid;
+  gap: 4px;
+}
+
+.similar-products__heading h3,
+.similar-products__query,
+.similar-products__empty {
+  margin: 0;
+}
+
+.similar-products__query,
+.similar-products__empty {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.similar-products__original {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.similar-products__list {
+  display: grid;
+  gap: 10px;
+}
+
+.similar-products__card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.similar-products__card span {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .result-placeholder {
   display: grid;
   place-items: center;

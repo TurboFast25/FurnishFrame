@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
+import urllib.parse
 import urllib.error
 import urllib.request
 from http import HTTPStatus
@@ -22,7 +25,7 @@ class FurnishFrameHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
 
     def do_POST(self) -> None:
-        if self.path not in {"/api/generate", "/api/analyze"}:
+        if self.path not in {"/api/generate", "/api/analyze", "/api/similar_products"}:
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown endpoint")
             return
 
@@ -41,6 +44,8 @@ class FurnishFrameHandler(SimpleHTTPRequestHandler):
                 request_body = build_analysis_request(payload)
                 gemini_response = call_gemini_api(request_body, api_key, ANALYSIS_MODEL)
                 result = extract_analysis_result(gemini_response)
+            elif self.path == "/api/similar_products":
+                result = search_similar_products(payload)
             else:
                 request_body = build_gemini_request(payload)
                 gemini_response = call_gemini_api(request_body, api_key, MODEL)
@@ -277,6 +282,101 @@ def extract_generation_result(response: dict) -> dict:
             "text": "\n".join(text_parts).strip() or "No text response.",
         },
     }
+
+
+def search_similar_products(payload: dict) -> dict:
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("items must include at least one staged item")
+
+    prompt = str(payload.get("prompt", "")).strip()
+    room_type = str((payload.get("roomAnalysis") or {}).get("roomType", "")).strip()
+    searches = []
+
+    for item in items[:6]:
+        if not isinstance(item, dict):
+            continue
+
+        item_name = str(item.get("name", "")).strip()
+        if not item_name:
+            continue
+
+        query = build_product_search_query(item_name, prompt, room_type)
+        results = fetch_duckduckgo_results(query)
+        searches.append(
+            {
+                "itemName": item_name,
+                "query": query,
+                "results": results,
+                "sourceProductUrl": str(item.get("productUrl", "")).strip(),
+            }
+        )
+
+    return {"searches": searches}
+
+
+def build_product_search_query(item_name: str, prompt: str, room_type: str) -> str:
+    style_terms = re.findall(r"[A-Za-z][A-Za-z-]+", prompt.lower())
+    trimmed_style = " ".join(style_terms[:4])
+    parts = [item_name]
+    if trimmed_style:
+        parts.append(trimmed_style)
+    if room_type:
+        parts.append(room_type)
+    parts.append("furniture")
+    return " ".join(parts)
+
+
+def fetch_duckduckgo_results(query: str) -> list[dict[str, str]]:
+    url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote_plus(query)}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=20) as response:
+        html_text = response.read().decode("utf-8", errors="replace")
+
+    matches = re.findall(
+        r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+        html_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    results = []
+    for href, raw_title in matches:
+        clean_url = normalize_duckduckgo_href(href)
+        clean_title = clean_html_text(raw_title)
+        if not clean_url or not clean_title:
+            continue
+        results.append(
+            {
+                "title": clean_title,
+                "url": clean_url,
+                "displayUrl": urllib.parse.urlparse(clean_url).netloc,
+            }
+        )
+        if len(results) >= 5:
+            break
+
+    return results
+
+
+def normalize_duckduckgo_href(href: str) -> str:
+    parsed = urllib.parse.urlparse(html.unescape(href))
+    if parsed.netloc and parsed.scheme in {"http", "https"}:
+        return href
+
+    query = urllib.parse.parse_qs(parsed.query)
+    target = query.get("uddg", [""])[0]
+    return urllib.parse.unquote(target)
+
+
+def clean_html_text(value: str) -> str:
+    no_tags = re.sub(r"<[^>]+>", "", value)
+    return " ".join(html.unescape(no_tags).split())
 
 
 def extract_analysis_result(response: dict) -> dict:

@@ -31,3 +31,20 @@ export async function requestNanoBananaGeneration(payload) {
 
   return response.json();
 }
+
+export async function requestSimilarProducts(payload) {
+  const response = await fetch("/api/similar_products", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `Similar product search failed with ${response.status}`);
+  }
+
+  return response.json();
+}
