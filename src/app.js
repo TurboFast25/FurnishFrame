@@ -312,9 +312,28 @@ function resetRoom() {
 }
 
 function handleKeydown(event) {
-  if (event.key === "Delete" || event.key === "Backspace") {
+  if (shouldIgnoreGlobalShortcut(event)) {
+    return;
+  }
+
+  if (event.key === "Delete") {
     removeSelectedItem();
   }
+}
+
+function shouldIgnoreGlobalShortcut(event) {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target.isContentEditable ||
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT"
+  );
 }
 
 async function generateScene() {
@@ -372,16 +391,29 @@ function render() {
 function renderPlacedItems() {
   syncBoardToImage();
   els.furnitureLayer.innerHTML = "";
+  const imageRect = getDisplayedImageRect();
 
   state.items.forEach((item) => {
     const fragment = els.placedTemplate.content.cloneNode(true);
     const button = fragment.querySelector(".placed-item");
     const { x, y } = getPercentPositionFromGrid(item.gridColumn, item.gridRow);
+    const placement = getArPlacementStyle(item, imageRect);
 
     button.dataset.instanceId = item.instanceId;
     button.style.left = `${x}%`;
     button.style.top = `${y}%`;
-    button.style.transform = `translate(-50%, -50%) scale(${item.scale / 100}) rotate(${item.rotation}deg) translateY(${item.elevation}px)`;
+    button.style.width = `${placement.width}px`;
+    button.style.height = `${placement.height}px`;
+    button.style.setProperty("--surface-tilt", `${placement.tilt}deg`);
+    button.style.setProperty("--surface-lift", `${placement.lift}px`);
+    button.style.setProperty("--surface-sheen", placement.sheen);
+    button.style.setProperty("--shadow-width", `${placement.shadowWidth}px`);
+    button.style.setProperty("--shadow-height", `${placement.shadowHeight}px`);
+    button.style.setProperty("--shadow-blur", `${placement.shadowBlur}px`);
+    button.style.setProperty("--shadow-opacity", placement.shadowOpacity);
+    button.style.setProperty("--shadow-offset", `${placement.shadowOffset}px`);
+    button.style.transform =
+      `translate(-50%, -50%) translateY(${item.elevation}px) rotate(${item.rotation}deg)`;
     button.classList.toggle("is-selected", item.instanceId === state.selectedId);
     const image = fragment.querySelector(".placed-item__image");
     image.src = item.imageUrl;
@@ -389,6 +421,26 @@ function renderPlacedItems() {
 
     els.furnitureLayer.appendChild(fragment);
   });
+}
+
+function getArPlacementStyle(item, imageRect) {
+  const depth = (item.gridRow + 1) / GRID_ROWS;
+  const scaledWidth = imageRect.width * (0.06 + depth * 0.08) * (item.scale / 100);
+  const width = clampValue(scaledWidth, 56, imageRect.width * 0.26);
+  const height = width * (0.62 + depth * 0.12);
+
+  return {
+    width,
+    height,
+    tilt: 58 - depth * 28,
+    lift: 10 + depth * 14,
+    sheen: String(0.12 + depth * 0.16),
+    shadowWidth: width * (0.72 + depth * 0.24),
+    shadowHeight: 12 + depth * 14,
+    shadowBlur: 16 + depth * 18,
+    shadowOpacity: String(0.18 + depth * 0.24),
+    shadowOffset: 8 + depth * 12,
+  };
 }
 
 function renderSelectionControls() {
@@ -480,6 +532,10 @@ function clamp01(value) {
 
 function clampGridIndex(value, size) {
   return Math.min(size - 1, Math.max(0, Math.round(value)));
+}
+
+function clampValue(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function setLog(message) {
