@@ -144,6 +144,13 @@ select {
   gap: 14px;
 }
 
+.brand-logo {
+  width: clamp(108px, 36%, 156px);
+  height: auto;
+  display: block;
+  object-fit: contain;
+}
+
 .eyebrow {
   margin: 0;
   font-size: 0.75rem;
