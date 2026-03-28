@@ -14,7 +14,7 @@ from pathlib import Path
 
 HOST = "127.0.0.1"
 PORT = 4173
-MODEL = os.environ.get("FURNISHFRAME_GEMINI_MODEL", "gemini-2.5-flash-image")
+MODEL = os.environ.get("FURNISHFRAME_GEMINI_MODEL", "gemini-3.1-flash-image-preview")
 ANALYSIS_MODEL = os.environ.get("FURNISHFRAME_ANALYSIS_MODEL", "gemini-2.5-flash")
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta/models"
 WEB_ROOT = Path(__file__).resolve().parent

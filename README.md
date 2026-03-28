@@ -28,7 +28,7 @@ python3 server.py
 
 Then visit `http://localhost:4173`.
 
-The server proxies generation requests to Google's Gemini image API using `gemini-2.5-flash-image` by default.
+The server proxies generation requests to Google's Gemini image API using `gemini-3.1-flash-image-preview` by default.
 
 The API key should stay in an environment variable, not in frontend files.
 
