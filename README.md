@@ -30,32 +30,31 @@ Then visit `http://localhost:4173`.
 
 The server proxies generation requests to Google's Gemini image API using `gemini-3.1-flash-image-preview` by default.
 
-The API key should stay in an environment variable, not in frontend files.
+#Inspiration
 
-## Deploy to Vercel
+FurnishFrame was inspired by the challenge many people face when trying to visualize how a space could look before committing to furniture or design changes. Traditional interior design tools can be time-consuming or require expertise, so we wanted to create an intuitive, AI-powered solution that makes design exploration accessible, fast, and engaging for anyone. Many inspirations came from home-building game aspects.
 
-The frontend is static and the API now runs through Vercel Python Functions:
+#What the application does
 
-- `api/analyze.py`
-- `api/generate.py`
-- `vercel.json`
+FurnishFrame is an AR-powered room staging tool that transforms uploaded photos into fully reimagined interior spaces. Users can experiment with different layouts, furniture styles, and décor preferences, and the app generates realistic, styled environments tailored to their vision. It allows users to quickly visualize multiple design possibilities before making real-world decisions.
 
-Deploy steps:
+#How it was built
 
-```bash
-npm i -g vercel
-vercel
-vercel env add GEMINI_API_KEY
-vercel --prod
-```
+The application is powered by Nano Banana 2, which enables advanced image generation and transformation. We developed a prompting system that interprets user input and translates it into detailed instructions for staging rooms. The system combines contextual understanding of room structure with style-based generation to produce cohesive and realistic outputs.
 
-Optional environment variables:
+#Challenges we ran into
 
-- `FURNISHFRAME_GEMINI_MODEL`
-- `FURNISHFRAME_ANALYSIS_MODEL`
+One of the main challenges was refining the prompting system to accurately interpret user instructions. Translating abstract preferences into precise object placement while maintaining spatial realism required multiple iterations. Ensuring that furniture and décor aligned naturally with the room’s layout and with each other, was another key technical hurdle.
 
-After the first `vercel` link step, subsequent production deploys are just:
+#How are project isn't like other applications
 
-```bash
-vercel --prod
-```
+Unlike many interior design tools that rely on static templates or manual placement, FurnishFrame dynamically generates fully staged environments based on user input. Its ability to combine AR, AI-driven generation, and contextual understanding allows for more personalized and realistic results, making it stand out from traditional design apps.
+
+#What we are proud of
+
+We are proud of creating a seamless and intuitive user experience that bridges creativity and technology. The app empowers users to explore design ideas effortlessly and produces high-quality, realistic transformations that feel both practical and inspiring.
+
+#What we learned
+
+Through building FurnishFrame, we learned the importance of prompt engineering in AI-driven applications. Small changes in how instructions are structured can significantly impact output quality. We also gained insights into balancing user control with automated generation to achieve both flexibility and coherence.
+
